@@ -1,7 +1,16 @@
-<html>
-<head><title>test</title></head>
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>타이니 서버</title>
+</head>
 <body> 
-<img align="middle" src="godzilla.gif">
-Dave O'Hallaron
+    <img align="middle" src="godzilla.gif">Dave O'Hallaron
+    <form action="/cgi-bin/adder" method="GET">
+        <h3>덧셈 계산기</h3>
+        <p>첫 번째 숫자 <input type="text" name="first"/></p>
+        <p>두 번째 숫자 <input type="text" name="second"/></p>
+        <input type="submit" value="더하기"/>
+    </form>
 </body>
 </html>

@@ -15,12 +15,11 @@ int main(int argc, char **argv) {
     socklen_t clientlen;
     struct sockaddr_storage clientaddr;
 
-    // if (argc != 2) {
-    //     fprintf(stderr, "usage: %s <port>\n", argv[0]);
-    //     exit(1);
-    // }
+    if (argc != 2) {
+        fprintf(stderr, "usage: %s <port>\n", argv[0]);
+        exit(1);
+    }
 
-    argv[1] = "2581";
     listenfd = Open_listenfd(argv[1]);
     while (1) {
         clientlen = sizeof(clientaddr);
@@ -127,7 +126,7 @@ int parse_uri(char *uri, char *filename, char *cgiargs) {
 
 void serve_static(int fd, char *filename, int filesize) {
     int srcfd;
-    char *srcp, filetype[MAXLINE], buf[MAXBUF];
+    char filetype[MAXLINE], buf[MAXBUF];
 
     get_filetype(filename, filetype);
     sprintf(buf, "HTTP/1.0 200 OK\r\n");
