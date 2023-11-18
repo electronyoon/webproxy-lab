@@ -18,7 +18,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "usage: %s <port>\n", argv[0]);
         exit(1);
     }
-	
+
     listenfd = Open_listenfd(argv[1]);
     while (1) {
         clientlen = sizeof(clientaddr);
@@ -59,13 +59,13 @@ void doit(int fd) {
             clienterror(fd, filename, "403", "Forbidden", "Tiny couldn't read the file");
             return;
         }
-		serve_static(fd, filename, sbuf.st_size);
+        serve_static(fd, filename, sbuf.st_size);
     } else {
         if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) {
             clienterror(fd, filename, "403", "Forbidden", "Tiny couldn't run the CGI program");
             return;
         }
-    	serve_dynamic(fd, filename, cgiargs);
+        serve_dynamic(fd, filename, cgiargs);
     }
 }
 
@@ -102,8 +102,7 @@ void read_requesthdrs(rio_t *rp) {
 
 int parse_uri(char *uri, char *filename, char *cgiargs) {
     char *ptr;
-	printf("uri: %s\n", uri);
-	
+
     if (!strstr(uri, "cgi-bin")) {
         strcpy(cgiargs, "");
         strcpy(filename, ".");
