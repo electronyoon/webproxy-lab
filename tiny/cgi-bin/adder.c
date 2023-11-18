@@ -10,8 +10,10 @@ int main(void) {
         *p = '\0';
         strcpy(arg1, buf);
         strcpy(arg2, p + 1);
-        n1 = atoi(arg1);
-        n2 = atoi(arg2);
+        char *p_n1 = index(arg1, '=');
+        char *p_n2 = index(arg2, '=');
+        n1 = atoi(p_n1 + 1);
+        n2 = atoi(p_n2 + 1);
     }
     sprintf(content, "QUERY_STRING=%s", buf);
     sprintf(content, "Welcome to add.com: ");
