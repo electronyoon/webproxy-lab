@@ -140,11 +140,11 @@ void serve_static(int fd, char *filename, int filesize) {
     printf("%s", buf);
 
     srcfd = Open(filename, O_RDONLY, 0);
-    srcp = malloc(filesize);
-    Rio_readn(srcfd, srcp, filesize);
+    char *fbuf = malloc(filesize);
+    Rio_readn(srcfd, fbuf, filesize);
     Close(srcfd);
-    rio_writen(fd, srcp, filesize);
-    Munmap(srcp, filesize);
+    Rio_writen(fd, fbuf, filesize);
+    free(fbuf);
 }
 
 void get_filetype(char *filename, char *filetype) {
