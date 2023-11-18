@@ -1,4 +1,5 @@
 #include "csapp.h"
+#include <signal.h>
 
 void doit(int fd);
 void read_requesthdrs(rio_t *rp);
@@ -162,6 +163,14 @@ void get_filetype(char *filename, char *filetype) {
         strcpy(filetype, "text/plain");
 }
 
+void handler(int signum) {
+    int status;
+    pid_t pid;
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        printf("Child process %d terminated\n", pid);
+    }
+}
+
 void serve_dynamic(int fd, char *filename, char *cgiargs) {
     char buf[MAXLINE], *emptylist[] = {NULL};
 
@@ -170,10 +179,11 @@ void serve_dynamic(int fd, char *filename, char *cgiargs) {
     sprintf(buf, "Server: Tiny Web Server\r\n");
     Rio_writen(fd, buf, strlen(buf));
 
+    Signal(SIGCHLD, handler);
     if (Fork() == 0) {
+        printf("Child process %d started\n", getpid());
         setenv("QUERY_STRING", cgiargs, 1);
         Dup2(fd, STDOUT_FILENO);
         Execve(filename, emptylist, environ);
     }
-    Wait(NULL);
 }
