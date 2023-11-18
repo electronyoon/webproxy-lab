@@ -14,11 +14,12 @@ int main(int argc, char **argv) {
     socklen_t clientlen;
     struct sockaddr_storage clientaddr;
 
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s <port>\n", argv[0]);
-        exit(1);
-    }
+    // if (argc != 2) {
+    //     fprintf(stderr, "usage: %s <port>\n", argv[0]);
+    //     exit(1);
+    // }
 
+    argv[1] = "2581";
     listenfd = Open_listenfd(argv[1]);
     while (1) {
         clientlen = sizeof(clientaddr);
@@ -155,6 +156,8 @@ void get_filetype(char *filename, char *filetype) {
         strcpy(filetype, "image/jpeg");
     else if (strstr(filename, ".mpg"))
         strcpy(filetype, "video/mpg");
+    else if (strstr(filename, ".mp4"))
+        strcpy(filetype, "video/mp4");
     else
         strcpy(filetype, "text/plain");
 }
