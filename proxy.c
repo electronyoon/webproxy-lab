@@ -110,28 +110,21 @@ void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longms
     Rio_writen(fd, body, strlen(body));
 }
 
-void parse_uri(char *uri, char *hostname, char *path, int *port) {
-    *port = 80;
-    char *pos = strstr(uri, "//");
+void parse_uri(char *uri, char *host, char *path, int *port) {
+    char *host_ptr = strstr(uri, "//") ? strstr(uri, "//") + 2 : uri;
+    char *port_ptr = strchr(host_ptr, ':');
+    char *path_ptr = strchr(host_ptr, '/');
+    char *charport;
+    strcpy(path, path_ptr);
 
-    pos = pos != NULL ? pos + 2 : uri;
-
-    char *pos2 = strstr(pos, ":");
-    if (pos2 != NULL) {
-        *pos2 = "\0";
-        sscanf(pos, "%s", hostname);
-        sscanf(pos2 + 1, "%d%s", port, path);
+    if (port_ptr) {
+        strncpy(charport, port_ptr + 1, path_ptr - port_ptr - 1);
+        strncpy(host, host_ptr, port_ptr - host_ptr);
     } else {
-        pos2 = strstr(pos, "/");
-        if (pos2 != NULL) {
-            *pos2 = "\0";
-            sscanf(pos, "%s", hostname);
-            *pos2 = '/';
-            sscanf(pos2, "%s", path);
-        } else {
-            sscanf(pos, "%s", hostname);
-        }
+        strcpy(charport, "8080");
+        strncpy(host, host_ptr, path_ptr - host_ptr);
     }
+    *port = atoi(charport);
     return;
 }
 
@@ -141,7 +134,7 @@ void get_http_headers(char *http_header, char *host, char *path, int port, rio_t
     while (Rio_readlineb(client_rio, buf, MAXLINE) > 0 && strcmp(buf, "\r\n")) {
         if (strstr(buf, "User-Agent"))
             strcat(headers, user_agent_hdr);
-        if (strstr(buf, "Host") || strstr(buf, "Connection") || strstr(buf, "Proxy-Connection") || strstr(buf, "Accept")) {
+        if (strstr(buf, "Host")) {
             strcat(headers, buf);
         }
     }
@@ -149,7 +142,7 @@ void get_http_headers(char *http_header, char *host, char *path, int port, rio_t
     sprintf(http_header, "%s%s", http_header, headers);
     sprintf(http_header, "%s", http_header);
     sprintf(http_header, "%sConnection: close\r\n", http_header);
-    sprintf(http_header, "%sProxy-Connection: close\r\n", http_header);
+    sprintf(http_header, "%sProxy-Connection: close\r\n\r\n", http_header);
     printf("Forwarding connection with headers: \n%s", http_header);
     return;
 }
