@@ -13,7 +13,6 @@ void parse_uri(char *uri, char *host, char *path, int *port);
 void get_http_headers(char *http_header, char *host, char *path, int port, rio_t *client_rio);
 int get_endserver(char *host, int port, char *http_header);
 
-#define DEBUG
 int main(int argc, char **argv) {
     int listenfd, connfd;
     socklen_t clientlen;
@@ -39,8 +38,6 @@ int main(int argc, char **argv) {
         Getnameinfo((SA *)&clientaddr, clientlen, host, MAXLINE, port, MAXLINE, 0);
         printf("Accepted connection from (%s, %s)\n", host, port);
         doit(connfd);
-        // rio_readlineb(&rio, buf, MAXLINE);
-        // printf("%s", buf);
         Close(connfd);
     }
     return 0;
