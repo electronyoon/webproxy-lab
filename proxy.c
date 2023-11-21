@@ -13,6 +13,7 @@ void get_http_headers(char *http_header, char *host, char *path, int port, rio_t
 int get_endserver(char *host, int port, char *http_header);
 
 
+#define DEBUG
 int main(int argc, char **argv) {
     int listenfd, connfd;
     socklen_t clientlen;
@@ -66,6 +67,9 @@ void doit(int connfd) {
     }
 
     parse_uri(uri, host, path, &port);
+    // while (Rio_readlineb(&rio, buf, MAXLINE) > 0 && strcmp(buf, "\r\n")) {
+    //     printf("%s", buf);
+    // }
 
     get_http_headers(server_http_header, host, path, port, &rio);
 
@@ -134,10 +138,9 @@ void parse_uri(char *uri, char *host, char *path, int *port) {
 
     cursor = strstr(pos_port, "/");
     if (cursor != NULL) {
-        *cursor = '\0';
-        pos_path = cursor + 1;
+        pos_path = cursor;
     } else {
-        pos_path = "";
+        pos_path = "/";
     }
 
     strcpy(host, pos_url);
@@ -162,9 +165,10 @@ void get_http_headers(char *http_header, char *host, char *path, int port, rio_t
     }
     sprintf(http_header, "GET %s HTTP/1.0\r\n", path);
     sprintf(http_header, "%s%s", http_header, headers);
-    sprintf(http_header, "%s\r\n", http_header);
+    sprintf(http_header, "%s", http_header);
     sprintf(http_header, "%sConnection: close\r\n", http_header);
     sprintf(http_header, "%sProxy-Connection: close\r\n", http_header);
+    printf("Forwarding connection with headers: \n%s", http_header);
     return;
 }
 
