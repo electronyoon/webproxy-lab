@@ -1,4 +1,5 @@
 #include <stdio.h>
+
 #include "csapp.h"
 
 #define MAX_CACHE_SIZE 1049000
@@ -12,8 +13,7 @@ void parse_uri(char *uri, char *host, char *path, int *port);
 void get_http_headers(char *http_header, char *host, char *path, int port, rio_t *client_rio);
 int get_endserver(char *host, int port, char *http_header);
 
-
-
+#define DEBUG
 int main(int argc, char **argv) {
     int listenfd, connfd;
     socklen_t clientlen;
@@ -67,9 +67,6 @@ void doit(int connfd) {
     }
 
     parse_uri(uri, host, path, &port);
-    // while (Rio_readlineb(&rio, buf, MAXLINE) > 0 && strcmp(buf, "\r\n")) {
-    //     printf("%s", buf);
-    // }
 
     get_http_headers(server_http_header, host, path, port, &rio);
 
@@ -113,39 +110,28 @@ void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longms
     Rio_writen(fd, body, strlen(body));
 }
 
-void parse_uri(char *uri, char *host, char *path, int *port) {
-    char *temp_uri;
-    strcpy(temp_uri, uri);
-    int temp_port = 80;
+void parse_uri(char *uri, char *hostname, char *path, int *port) {
+    *port = 80;
+    char *pos = strstr(uri, "//");
 
-    char *cursor;
-    char *pos_url, *pos_port, *pos_path;
+    pos = pos != NULL ? pos + 2 : uri;
 
-    cursor = strstr(temp_uri, "://");
-    if (cursor != NULL) {
-        pos_url = cursor + 3;
+    char *pos2 = strstr(pos, ":");
+    if (pos2 != NULL) {
+        *pos2 = "\0";
+        sscanf(pos, "%s", hostname);
+        sscanf(pos2 + 1, "%d%s", port, path);
     } else {
-        pos_url = temp_uri;
+        pos2 = strstr(pos, "/");
+        if (pos2 != NULL) {
+            *pos2 = "\0";
+            sscanf(pos, "%s", hostname);
+            *pos2 = '/';
+            sscanf(pos2, "%s", path);
+        } else {
+            sscanf(pos, "%s", hostname);
+        }
     }
-    
-    cursor = strstr(pos_url, ":");
-    if (cursor != NULL) {
-        *cursor = '\0';
-        pos_port = cursor + 1;
-    } else {
-        pos_port = &temp_port;
-    }
-
-    cursor = strstr(pos_port, "/");
-    if (cursor != NULL) {
-        pos_path = cursor;
-    } else {
-        pos_path = "/";
-    }
-
-    strcpy(host, pos_url);
-    strcpy(path, pos_path);
-    *port = atoi(pos_port);
     return;
 }
 
@@ -155,11 +141,7 @@ void get_http_headers(char *http_header, char *host, char *path, int port, rio_t
     while (Rio_readlineb(client_rio, buf, MAXLINE) > 0 && strcmp(buf, "\r\n")) {
         if (strstr(buf, "User-Agent"))
             strcat(headers, user_agent_hdr);
-        if (strstr(buf, "Host")
-            || strstr(buf, "Connection")
-            || strstr(buf, "Proxy-Connection")
-            || strstr(buf, "Accept")
-            ) {
+        if (strstr(buf, "Host") || strstr(buf, "Connection") || strstr(buf, "Proxy-Connection") || strstr(buf, "Accept")) {
             strcat(headers, buf);
         }
     }
@@ -173,7 +155,7 @@ void get_http_headers(char *http_header, char *host, char *path, int port, rio_t
 }
 
 int get_endserver(char *host, int port, char *http_header) {
-    char port_str[6];       // max upto 5, one for '\0'
+    char port_str[6];  // max upto 5, one for "\0"
     sprintf(port_str, "%d", port);
     return Open_clientfd(host, port_str);
 }
