@@ -13,7 +13,6 @@ void get_http_headers(char *http_header, char *host, char *path, int port, rio_t
 int get_endserver(char *host, int port, char *http_header);
 
 
-#define DEBUG
 int main(int argc, char **argv) {
     int listenfd, connfd;
     socklen_t clientlen;
