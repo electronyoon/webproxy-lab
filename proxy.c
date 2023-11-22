@@ -8,34 +8,57 @@
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
 static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
-struct threadArgs {
+
+typedef struct {
     int fd;
+    char *host;
+    char *port;
     int threadIdent;
     struct sockaddr_in clientAddress;
     int connport;
     char *hap;
-};
+} thread_args;
 
-void doit(int connfd, int port, struct sockaddr_in *sockaddr, int threadIdent);
+void *handle_thread(void *vargp);
+void handle_client(int connfd, char *host, int port, struct sockaddr_in *clientAddress, int threadIdent);
 int parse_uri(char *uri, char *hostname, char *pathname, int *port);
-void get_http_headers(char *http_header, char *host, char *path, int port, rio_t *client_rio);
-int get_endserver(char *host, int port, char *http_header);
-void *threadCode(void *vargp);
+int get_from_cache(char *url, int clientfd);
+void get_from_server(char *host, char *port, char *url, char buf_to_server[MAXLINE], int clientfd, rio_t rio_to_client);
+// static struct CacheList *cache = (CacheList *) Calloc(1, sizeof(CacheList));
+static sem_t mutex;
 
 int main(int argc, char **argv) {
     int clientfd, clientlen, port, id = 0;
     struct sockaddr_in clientAddress;
     pthread_t tid;
 
-    clientfd = Open_listenfd(argv[1]);
+    if (argc != 2) {
+        fprintf(stderr, "usage: %s <port>\n", argv[0]);
+        exit(1);
+    }
+    // argv[1] = "15213";
+
     Signal(SIGPIPE, SIG_IGN);
+
+    // cache_init(cache);
+
+    if ((clientfd = Open_listenfd(argv[1])) < 0) {
+        fprintf(stderr, "Error: %s\n", strerror(errno));
+        exit(1);
+    }
+
     while (1) {
-        struct threadArgs *thread;
-        thread = Malloc(sizeof(struct threadArgs));
+        thread_args *thread;
+        thread = Malloc(sizeof(thread_args));
         clientlen = sizeof(clientAddress);
         thread->fd = Accept(clientfd, (SA *)&clientAddress, (socklen_t *)&clientlen);
         thread->connport = port;
         thread->clientAddress = clientAddress;
+
+        char *host[MAXLINE], *port[MAXLINE];
+        Getnameinfo((SA *)&clientAddress, clientlen, host, MAXLINE, port, MAXLINE, 0);
+        thread->host = host;
+        thread->port = port;
 
         sem_t mutex;
         sem_init(&mutex, 0, 1);
@@ -44,46 +67,44 @@ int main(int argc, char **argv) {
         V(&mutex);
         thread->hap = inet_ntoa(clientAddress.sin_addr);
 
-        Pthread_create(&tid, NULL, threadCode, thread);
+        Pthread_create(&tid, NULL, handle_thread, thread);
     }
     printf("Shutting down...\n");
     Close(clientfd);
+    // cache_destruct(cache);
     return EXIT_SUCCESS;
 }
 
-void *threadCode(void *vargp) {
+void *handle_thread(void *vargp) {
     int connfd, port, threadIdent;
-    char *hap;
+    char *hap, *host;
     struct sockaddr_in clientAddress;
-    struct threadArgs *thread = ((struct threadArgs *)vargp);
+    thread_args *thread = (struct thread_args *)vargp;
 
     clientAddress = thread->clientAddress;
     connfd = thread->fd;
     port = thread->connport;
     hap = thread->hap;
+    host = thread->host;
     threadIdent = thread->threadIdent;
 
     Free(vargp);
     pthread_detach(pthread_self());
     printf("Thread %d received request from %s\n", threadIdent, hap);
 
-    doit(connfd, port, &clientAddress, threadIdent);
+    handle_client(connfd, host, port, &clientAddress, threadIdent);
     Close(connfd);
     return NULL;
 }
 
-void doit(int connfd, int port, struct sockaddr_in *sockaddr, int threadIdent) {
-    int serverfd;
-    int end_serverfd;
-    char server_http_header[MAXLINE];
-    rio_t rio, riohost;
+void handle_client(int connfd, char *host, int port, struct sockaddr_in *clientAddress, int threadIdent) {
+    char method[MAXLINE], uri[MAXLINE], version[MAXLINE], path[MAXLINE];
 
-    char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
-    char host[MAXLINE], path[MAXLINE];
-
-    Rio_readinitb(&rio, connfd);
-    Rio_readlineb(&rio, buf, MAXLINE);
-    sscanf(buf, "%s %s %s", method, uri, version);
+    rio_t rio_to_client;
+    char buf_to_client[MAXLINE];
+    Rio_readinitb(&rio_to_client, connfd);
+    Rio_readlineb(&rio_to_client, buf_to_client, MAXLINE);
+    sscanf(buf_to_client, "%s %s %s", method, uri, version);
     printf("Method: %s\n", method);
     printf("URI: %s\n", uri);
     if (strcasecmp(method, "GET")) {
@@ -91,48 +112,27 @@ void doit(int connfd, int port, struct sockaddr_in *sockaddr, int threadIdent) {
         return;
     }
     
-    // declare new port and copy port into new port
-    int newport = port;
-    parse_uri(uri, host, path, &newport);
+    parse_uri(uri, host, path, &port);
     printf("Host: %s\n", host);
     printf("Path: %s\n", path);
-    int hostfd = 0;
-    char newportstr[6];
-    sprintf(newportstr, "%d", newport);
-    if ((hostfd = Open_clientfd(host, newportstr)) < 0) {
-        return;
-    }
+    printf("Port: %d\n", port);
 
-    sprintf(buf, "%s /%s %s\r\n", method, path, "HTTP/1.0");
-    Rio_readinitb(&riohost, hostfd);
-    Rio_writen(hostfd, buf, strlen(buf));
-    size_t n;
-    int client = 0;
-    while (!client && ((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0)) {
-        printf("Thread %d: Forwarding request to host\n", threadIdent);
-        printf("buf(%zu bytes): %s", n, buf);
-        Rio_writen(hostfd, buf, n);
-        client = (buf[0] == '\r');
-    }
-    printf("*** End of Request From Client ***\n");
+    char buf_to_server[MAXLINE];
+    strcpy(buf_to_server, "GET /");
+    strcat(buf_to_server, path);
+    strcat(buf_to_server, " HTTP/1.0\r\n");
+    strcat(buf_to_server, "Host: ");
+    strcat(buf_to_server, host);
+    strcat(buf_to_server, "\r\n\r\n");
 
-    int size;
-    while ((n = Rio_readnb(&riohost, buf, MAXLINE)) != 0) {
-        printf("Thread %d: Forwarding response from host\n", threadIdent);
-        printf("buf(%zu bytes): %s", n, buf);
-        Rio_writen(connfd, buf, n);
-        size += n;
-        bzero(buf, MAXLINE);
-    }
-    printf("*** End of Request**\n");
-    printf("Thread %d: Forwarded %d bytes from end server to client\n", threadIdent, size);
+    // if (!get_from_cache(req, connfd)) {
+    //     get_from_server(req, new_req_buf, connfd, rio_to_client);
+    // }
+    char char_port[MAXLINE];
+    sprintf(char_port, "%d", port);
+    get_from_server(host, char_port, uri, buf_to_server, connfd, rio_to_client);
 
-    sem_t mutex2;
-    sem_init(&mutex2, 0, 1);
-    P(&mutex2);
-    V(&mutex2);
-    Close(hostfd);
-    return;
+    return NULL;
 }
 
 int parse_uri(char *uri, char *hostname, char *pathname, int *port) {
@@ -143,7 +143,6 @@ int parse_uri(char *uri, char *hostname, char *pathname, int *port) {
 
     if (strncasecmp(uri, "http://", 7) != 0) {
         hostname[0] = '\0';
-        return -1;
     }
     hostbegin = uri + 7;
     hostend = strpbrk(hostbegin, " :/\r\n\0");
@@ -163,34 +162,46 @@ int parse_uri(char *uri, char *hostname, char *pathname, int *port) {
     }
     if (strlen(pathname) == 0)
         strcat(pathname, "/");
+
     return 0;
 }
 
-void get_http_headers(char *http_header, char *host, char *path, int port, rio_t *client_rio) {
-    char buf[MAXLINE], headers[MAXLINE];
+void get_from_server(char *host, char *port, char *url, char buf_to_server[MAXLINE], int clientfd, rio_t rio_to_client) {
+    int serverfd = Open_clientfd(host, port);
+    rio_t rio_to_server;
+    Rio_readinitb(&rio_to_server, serverfd);
+    Rio_writen(serverfd, buf_to_server, strlen(buf_to_server));
 
-    while (Rio_readlineb(client_rio, buf, MAXLINE) > 0 && strcmp(buf, "\r\n")) {
-        if (strstr(buf, "User-Agent"))
-            strcat(headers, user_agent_hdr);
-        if (strstr(buf, "Host")) {
-            strcat(headers, buf);
-            if (*host == '\0')
-                sscanf(buf, "Host: %[^:\r\n]", host);
-            if (port == 0)
-                sscanf(buf, "Host: %*[^:]:%d", &port);
+    char *buf = Malloc(MAXLINE);
+    char *p, *temp = Calloc(1, MAX_CACHE_SIZE);
+    int n, size = 0;
+    int can_cache = 1;
+    while ((n = Rio_readnb(&rio_to_server, buf, MAXLINE)) != 0) {
+        printf("proxy received %d bytes, then send\n", n);
+        printf("buf: %s\n", buf);
+        Rio_writen(clientfd, buf, n);
+        if (size + n <= MAX_OBJECT_SIZE) {
+            memcpy(temp + size, buf, n);
+            size += n;
+        } else {
+            can_cache = 0;
         }
     }
-    sprintf(http_header, "GET %s HTTP/1.0\r\n", path);
-    sprintf(http_header, "%s%s", http_header, headers);
-    sprintf(http_header, "%s", http_header);
-    sprintf(http_header, "%sConnection: close\r\n", http_header);
-    sprintf(http_header, "%sProxy-Connection: close\r\n\r\n", http_header);
-    printf("Forwarding connection with headers: \n%s", http_header);
-    return;
+    // if (can_cache) {
+    //     cache_url(url, temp, size, cache);
+    // }
+    Close(serverfd);
+    Free(temp);
+    Free(p);
+    Free(buf);
 }
 
-int get_endserver(char *host, int port, char *http_header) {
-    char port_str[6];  // max upto 5, one for "\0"
-    sprintf(port_str, "%d", port);
-    return Open_clientfd(host, port_str);
+int get_from_cache(char *url, int clientfd) {
+    // struct CachedItem *node = find(url, cache);
+    // if (node) {
+    //     move_to_front(url, cache);
+    //     Rio_writen(clientfd, node->item, node->size);
+    //     return 1;
+    // }
+    return 0;
 }
