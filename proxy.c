@@ -19,13 +19,35 @@ typedef struct {
     char *hap;
 } thread_args;
 
+struct cache_line {
+    int valid;
+    char *tag;
+    char *block;
+};
+
+struct cache_set {
+    struct cache_line *line;
+    int *use;
+};
+
+struct cache {
+    struct cache_set *set;
+};
+
+static struct cache cache;
+static int set_num, line_num;
+static sem_t mutex;
+
 void *handle_thread(void *vargp);
 void handle_client(int connfd, char *host, int port, struct sockaddr_in *clientAddress, int threadIdent);
 int parse_uri(char *uri, char *hostname, char *pathname, int *port);
 int get_from_cache(char *url, int clientfd);
-void get_from_server(char *host, char *port, char *url, char buf_to_server[MAXLINE], int clientfd, rio_t rio_to_client);
-// static struct CacheList *cache = (CacheList *) Calloc(1, sizeof(CacheList));
-static sem_t mutex;
+void get_from_server(int connfd, char *host, char *port, char *url, char *buf_to_server, char *cache_buf);
+void init_cache();
+static void update_use(int *cache_use, int current, int len);
+static int load_cache(char *tag, char *response);
+static void save_cache(char *tag, char *response);
+// void get_from_server(char *host, char *port, char *url, char buf_to_server[MAXLINE], int clientfd, rio_t rio_to_client);
 
 int main(int argc, char **argv) {
     int clientfd, clientlen, port, id = 0;
@@ -40,12 +62,15 @@ int main(int argc, char **argv) {
 
     Signal(SIGPIPE, SIG_IGN);
 
-    // cache_init(cache);
-
     if ((clientfd = Open_listenfd(argv[1])) < 0) {
         fprintf(stderr, "Error: %s\n", strerror(errno));
         exit(1);
     }
+
+    sem_init(&mutex, 0, 1);
+    set_num = 1;
+    line_num = 10;
+    init_cache();
 
     while (1) {
         thread_args *thread;
@@ -60,8 +85,6 @@ int main(int argc, char **argv) {
         thread->host = host;
         thread->port = port;
 
-        sem_t mutex;
-        sem_init(&mutex, 0, 1);
         P(&mutex);
         thread->threadIdent = id++;
         V(&mutex);
@@ -71,7 +94,6 @@ int main(int argc, char **argv) {
     }
     printf("Shutting down...\n");
     Close(clientfd);
-    // cache_destruct(cache);
     return EXIT_SUCCESS;
 }
 
@@ -111,11 +133,13 @@ void handle_client(int connfd, char *host, int port, struct sockaddr_in *clientA
         printf("Invalid Request. Can only handle GET.\n");
         return;
     }
-    
+
     parse_uri(uri, host, path, &port);
     printf("Host: %s\n", host);
     printf("Path: %s\n", path);
     printf("Port: %d\n", port);
+    char char_port[MAXLINE];
+    sprintf(char_port, "%d", port);
 
     char buf_to_server[MAXLINE];
     strcpy(buf_to_server, "GET /");
@@ -125,12 +149,17 @@ void handle_client(int connfd, char *host, int port, struct sockaddr_in *clientA
     strcat(buf_to_server, host);
     strcat(buf_to_server, "\r\n\r\n");
 
-    // if (!get_from_cache(req, connfd)) {
-    //     get_from_server(req, new_req_buf, connfd, rio_to_client);
-    // }
-    char char_port[MAXLINE];
-    sprintf(char_port, "%d", port);
-    get_from_server(host, char_port, uri, buf_to_server, connfd, rio_to_client);
+    char cache_buf[MAX_OBJECT_SIZE];
+    if (load_cache(uri, cache_buf) == 1) {
+        printf("Hit!\n");
+        if (rio_writen(connfd, cache_buf, sizeof(cache_buf)) < 0) {
+            fprintf(stderr, "Error: cache load!\n");
+            return;
+        }
+        memset(cache_buf, 0, sizeof(cache_buf));
+    } else {
+        get_from_server(connfd, host, char_port, uri, buf_to_server, cache_buf);
+    }
 
     return NULL;
 }
@@ -166,42 +195,126 @@ int parse_uri(char *uri, char *hostname, char *pathname, int *port) {
     return 0;
 }
 
-void get_from_server(char *host, char *port, char *url, char buf_to_server[MAXLINE], int clientfd, rio_t rio_to_client) {
-    int serverfd = Open_clientfd(host, port);
+// void get_from_server(char *host, char *port, char *url, char buf_to_server[MAXLINE], int clientfd, rio_t rio_to_client) {
+//     int serverfd = Open_clientfd(host, port);
+//     rio_t rio_to_server;
+//     Rio_readinitb(&rio_to_server, serverfd);
+//     Rio_writen(serverfd, buf_to_server, strlen(buf_to_server));
+
+//     char *buf = Malloc(MAXLINE);
+//     char *p, *temp = Calloc(1, MAX_CACHE_SIZE);
+//     int n, size = 0;
+//     int can_cache = 1;
+//     while ((n = Rio_readnb(&rio_to_server, buf, MAXLINE)) != 0) {
+//         printf("proxy received %d bytes, then send\n", n);
+//         printf("buf: %s\n", buf);
+//         Rio_writen(clientfd, buf, n);
+//         if (size + n <= MAX_OBJECT_SIZE) {
+//             memcpy(temp + size, buf, n);
+//             size += n;
+//         } else {
+//             can_cache = 0;
+//         }
+//     }
+//     if (can_cache) {
+//         cache_url(url, temp, size, cache);
+//     }
+//     Close(serverfd);
+//     Free(temp);
+//     Free(p);
+//     Free(buf);
+// }
+void get_from_server(int connfd, char *host, char *port, char *url, char *buf_to_server, char *cache_buf) {
+    int serverfd, len, len_sum = 0;
+    if ((serverfd = Open_clientfd(host, port)) < 0) {
+        fprintf(stderr, "open server fd error\n");
+        return;
+    }
+    
     rio_t rio_to_server;
     Rio_readinitb(&rio_to_server, serverfd);
     Rio_writen(serverfd, buf_to_server, strlen(buf_to_server));
 
-    char *buf = Malloc(MAXLINE);
-    char *p, *temp = Calloc(1, MAX_CACHE_SIZE);
-    int n, size = 0;
-    int can_cache = 1;
-    while ((n = Rio_readnb(&rio_to_server, buf, MAXLINE)) != 0) {
-        printf("proxy received %d bytes, then send\n", n);
-        printf("buf: %s\n", buf);
-        Rio_writen(clientfd, buf, n);
-        if (size + n <= MAX_OBJECT_SIZE) {
-            memcpy(temp + size, buf, n);
-            size += n;
-        } else {
-            can_cache = 0;
-        }
+    memset(cache_buf, 0, sizeof(cache_buf));
+    char *buf_to_client = Malloc(MAXLINE);
+    // while ((len = Rio_readnb(&rio_to_server, buf_to_client, sizeof(buf_to_client))) > 0) {
+    while ((len = Rio_readnb(&rio_to_server, buf_to_client, MAXLINE)) != 0) {
+        Rio_writen(connfd, buf_to_client, len);
+        strcat(cache_buf, buf_to_client);
+        len_sum += len;
+        memset(buf_to_client, 0, sizeof(buf_to_client));
     }
-    // if (can_cache) {
-    //     cache_url(url, temp, size, cache);
-    // }
-    Close(serverfd);
-    Free(temp);
-    Free(p);
-    Free(buf);
+    if (len_sum <= MAX_OBJECT_SIZE) {
+        P(&mutex);
+        save_cache(url, cache_buf);
+        V(&mutex);
+    }
+    close(serverfd);
 }
 
-int get_from_cache(char *url, int clientfd) {
-    // struct CachedItem *node = find(url, cache);
-    // if (node) {
-    //     move_to_front(url, cache);
-    //     Rio_writen(clientfd, node->item, node->size);
-    //     return 1;
-    // }
-    return 0;
+// int get_from_cache(char *url, int clientfd) {
+//     struct CachedItem *node = find(url, cache);
+//     if (node) {
+//         move_to_front(url, cache);
+//         Rio_writen(clientfd, node->item, node->size);
+//         return 1;
+//     }
+//     return 0;
+// }
+
+void init_cache() {
+    int i, j;
+    cache.set = malloc(sizeof(struct cache_set) * set_num);
+    for (i = 0; i < set_num; i++) {
+        cache.set[i].line = malloc(sizeof(struct cache_line) * line_num);
+        cache.set[i].use = malloc(sizeof(int) * line_num);
+        for (j = 0; j < line_num; j++) {
+            cache.set[i].use[j] = j;
+            cache.set[i].line[j].valid = 0;
+            cache.set[i].line[j].tag = malloc(MAXLINE);
+            cache.set[i].line[j].block = malloc(MAX_OBJECT_SIZE);
+        }
+    }
+}
+
+static void update_use(int *cache_use, int current, int len) {
+    int i, j;
+    for (i = 0; i < len; i++)
+        if (cache_use[i] == current)
+            break;
+    for (j = i; j > 0; j--)
+        cache_use[j] = cache_use[j - 1];
+    cache_use[0] = current;
+}
+
+static int load_cache(char *tag, char *response) {
+    int index, i;
+    index = 0;
+    for (i = 0; i < line_num; i++) {
+        if (cache.set[index].line[i].valid == 1 &&
+            (strcmp(cache.set[index].line[i].tag, tag) == 0)) {
+            P(&mutex);
+            update_use(cache.set[index].use, i, line_num);
+            V(&mutex);
+            strcpy(response, cache.set[index].line[i].block);
+            break;
+        }
+    }
+    if (i == line_num) {
+        return 0;
+    } else {
+        return 1;
+    }
+}
+
+static void save_cache(char *tag, char *response) {
+    int index, eviction;
+    index = 0;
+    eviction = cache.set[index].use[line_num - 1];
+    strcpy(cache.set[index].line[eviction].tag, tag);
+    strcpy(cache.set[index].line[eviction].block, response);
+    if (cache.set[index].line[eviction].valid == 0) {
+        cache.set[index].line[eviction].valid = 1;
+    }
+    update_use(cache.set[index].use, eviction, line_num);
 }
