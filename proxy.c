@@ -3,6 +3,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
 #include "csapp.h"
 
 #define MAX_CACHE_SIZE 1049000
@@ -47,7 +48,6 @@ void init_cache();
 static void update_use(int *cache_use, int current, int len);
 static int load_cache(char *tag, char *response);
 static void save_cache(char *tag, char *response);
-// void get_from_server(char *host, char *port, char *url, char buf_to_server[MAXLINE], int clientfd, rio_t rio_to_client);
 
 int main(int argc, char **argv) {
     int clientfd, clientlen, port, id = 0;
@@ -195,49 +195,19 @@ int parse_uri(char *uri, char *hostname, char *pathname, int *port) {
     return 0;
 }
 
-// void get_from_server(char *host, char *port, char *url, char buf_to_server[MAXLINE], int clientfd, rio_t rio_to_client) {
-//     int serverfd = Open_clientfd(host, port);
-//     rio_t rio_to_server;
-//     Rio_readinitb(&rio_to_server, serverfd);
-//     Rio_writen(serverfd, buf_to_server, strlen(buf_to_server));
-
-//     char *buf = Malloc(MAXLINE);
-//     char *p, *temp = Calloc(1, MAX_CACHE_SIZE);
-//     int n, size = 0;
-//     int can_cache = 1;
-//     while ((n = Rio_readnb(&rio_to_server, buf, MAXLINE)) != 0) {
-//         printf("proxy received %d bytes, then send\n", n);
-//         printf("buf: %s\n", buf);
-//         Rio_writen(clientfd, buf, n);
-//         if (size + n <= MAX_OBJECT_SIZE) {
-//             memcpy(temp + size, buf, n);
-//             size += n;
-//         } else {
-//             can_cache = 0;
-//         }
-//     }
-//     if (can_cache) {
-//         cache_url(url, temp, size, cache);
-//     }
-//     Close(serverfd);
-//     Free(temp);
-//     Free(p);
-//     Free(buf);
-// }
 void get_from_server(int connfd, char *host, char *port, char *url, char *buf_to_server, char *cache_buf) {
     int serverfd, len, len_sum = 0;
     if ((serverfd = Open_clientfd(host, port)) < 0) {
         fprintf(stderr, "open server fd error\n");
         return;
     }
-    
+
     rio_t rio_to_server;
     Rio_readinitb(&rio_to_server, serverfd);
     Rio_writen(serverfd, buf_to_server, strlen(buf_to_server));
 
     memset(cache_buf, 0, sizeof(cache_buf));
     char *buf_to_client = Malloc(MAXLINE);
-    // while ((len = Rio_readnb(&rio_to_server, buf_to_client, sizeof(buf_to_client))) > 0) {
     while ((len = Rio_readnb(&rio_to_server, buf_to_client, MAXLINE)) != 0) {
         Rio_writen(connfd, buf_to_client, len);
         strcat(cache_buf, buf_to_client);
@@ -252,27 +222,17 @@ void get_from_server(int connfd, char *host, char *port, char *url, char *buf_to
     close(serverfd);
 }
 
-// int get_from_cache(char *url, int clientfd) {
-//     struct CachedItem *node = find(url, cache);
-//     if (node) {
-//         move_to_front(url, cache);
-//         Rio_writen(clientfd, node->item, node->size);
-//         return 1;
-//     }
-//     return 0;
-// }
-
 void init_cache() {
     int i, j;
-    cache.set = malloc(sizeof(struct cache_set) * set_num);
+    cache.set = Malloc(sizeof(struct cache_set) * set_num);
     for (i = 0; i < set_num; i++) {
-        cache.set[i].line = malloc(sizeof(struct cache_line) * line_num);
-        cache.set[i].use = malloc(sizeof(int) * line_num);
+        cache.set[i].line = Malloc(sizeof(struct cache_line) * line_num);
+        cache.set[i].use = Malloc(sizeof(int) * line_num);
         for (j = 0; j < line_num; j++) {
             cache.set[i].use[j] = j;
             cache.set[i].line[j].valid = 0;
-            cache.set[i].line[j].tag = malloc(MAXLINE);
-            cache.set[i].line[j].block = malloc(MAX_OBJECT_SIZE);
+            cache.set[i].line[j].tag = Malloc(MAXLINE);
+            cache.set[i].line[j].block = Malloc(MAX_OBJECT_SIZE);
         }
     }
 }
